@@ -1,7 +1,8 @@
-FROM mcr.microsoft.com/playwright:v1.45.0-focal
+FROM mcr.microsoft.com/playwright:v1.59.1-focal
 WORKDIR /app
 COPY . .
 RUN npm install
-# Instalamos los navegadores dentro del contenedor para que no falten
-RUN npx playwright install chromium --with-deps
+# Forzamos la instalación de las dependencias del navegador
+RUN npx playwright install-deps chromium
+RUN npx playwright install chromium
 CMD ["node", "index.js"]
