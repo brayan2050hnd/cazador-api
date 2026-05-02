@@ -3,34 +3,51 @@ const axios = require('axios');
 const app = express();
 
 const PORT = process.env.PORT || 8080;
-const AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+const AGENT = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
 
 app.get('/animal-planet.m3u8', async (req, res) => {
-    console.log("=== Iniciando extracción automática ===");
+    console.log("=== Iniciando Rastreo Profundo ===");
     try {
-        const response = await axios.get('https://www.tvporinternet2.com/animal-planet-en-vivo-por-internet.html', {
-            headers: { 
-                'User-Agent': AGENT,
-                'Referer': 'https://www.google.com/' 
-            }
+        // 1. Entramos a la web principal
+        const res1 = await axios.get('https://www.tvporinternet2.com/animal-planet-en-vivo-por-internet.html', {
+            headers: { 'User-Agent': AGENT, 'Referer': 'https://www.google.com/' }
         });
 
-        const html = response.data;
-        // Buscamos el link que encontraste con Reqable
-        const regex = /https:\/\/regionales[^\s"']+\.m3u8\?token=[a-zA-Z0-9_-]+&expires=[0-9]+/g;
-        const match = html.match(regex);
+        let html = res1.data;
+        let regexLink = /https?:\/\/[^"']+\.m3u8\?token=[^"']+/i;
+        let match = html.match(regexLink);
 
-        if (match && match[0]) {
-            console.log("¡Token Atrapado!: " + match[0]);
-            res.redirect(`https://${req.get('host')}/proxy/video.m3u8?url=${encodeURIComponent(match[0])}`);
-        } else {
-            res.status(404).send("No se encontró el link en el código. Puede que el token esté oculto.");
+        // 2. Si no aparece, buscamos el reproductor (iframe)
+        if (!match) {
+            console.log("Link no visto en superficie, buscando en el reproductor...");
+            const iframeMatch = html.match(/<iframe[^>]+src="([^"]+)"/i);
+            
+            if (iframeMatch) {
+                const iframeUrl = iframeMatch[1];
+                console.log("Entrando al túnel: " + iframeUrl);
+                const res2 = await axios.get(iframeUrl, { 
+                    headers: { 'User-Agent': AGENT, 'Referer': 'https://www.tvporinternet2.com/' } 
+                });
+                match = res2.data.match(regexLink);
+            }
         }
+
+        if (match) {
+            const linkReal = match[0].replace(/\\/g, ''); // Limpiamos barras raras
+            console.log("¡LO TENEMOS!: " + linkReal);
+            res.redirect(`https://${req.get('host')}/proxy/video.m3u8?url=${encodeURIComponent(linkReal)}`);
+        } else {
+            console.log("La página escondió el link muy bien. Intenta refrescar.");
+            res.status(404).send("Error: No se encontró la señal. La página está bloqueando el acceso.");
+        }
+
     } catch (e) {
-        res.status(500).send("Error: " + e.message);
+        console.error("Fallo técnico: ", e.message);
+        res.status(500).send("Error del servidor: " + e.message);
     }
 });
 
+// PROXY (No lo toques, es el que hace que se vea en verde)
 app.get('/proxy/:archivo', async (req, res) => {
     const targetUrl = req.query.url;
     const archivo = req.params.archivo;
@@ -57,7 +74,7 @@ app.get('/proxy/:archivo', async (req, res) => {
             let finalM3u8 = text.replace(/^(?!#)(.+)$/gm, (match, p1) => {
                 let chunk = p1.trim();
                 let fullUrl = chunk.startsWith('http') ? chunk : baseUrl + chunk;
-                return `https://${req.get('host')}/proxy/segmento.ts?url=${encodeURIComponent(fullUrl)}`;
+                return `https://${req.get('host')}/proxy/chunk.ts?url=${encodeURIComponent(fullUrl)}`;
             });
             res.send(finalM3u8);
         } else {
@@ -69,5 +86,5 @@ app.get('/proxy/:archivo', async (req, res) => {
     }
 });
 
-app.get('/', (req, res) => res.send('Cazador Online y Ligero.'));
+app.get('/', (req, res) => res.send('Cazador Activo y Listo.'));
 app.listen(PORT, '0.0.0.0', () => console.log(`Puerto ${PORT}`));
