@@ -4,6 +4,10 @@ const app = express();
 
 const PORT = process.env.PORT || 8080;
 
+// Aquí guardaremos las "llaves secretas" de la sesión
+let sessionCookies = '';
+let globalUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
 app.get('/animal-planet', async (req, res) => {
     console.log("Iniciando cacería de link...");
     let browser;
@@ -14,7 +18,7 @@ app.get('/animal-planet', async (req, res) => {
         });
         
         const context = await browser.newContext({
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            userAgent: globalUserAgent,
             extraHTTPHeaders: { 'Referer': 'https://www.tvporinternet2.com/' }
         });
         
@@ -37,6 +41,10 @@ app.get('/animal-planet', async (req, res) => {
             espera++;
         }
 
+        // ¡MAGIA NUEVA!: Copiamos las cookies del navegador antes de cerrarlo
+        const cookies = await context.cookies();
+        sessionCookies = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
         await browser.close();
 
         if (m3u8Url) {
@@ -52,27 +60,30 @@ app.get('/animal-planet', async (req, res) => {
     }
 });
 
+// NUESTRO PROXY MAESTRO
 app.get('/proxy', async (req, res) => {
     const targetUrl = req.query.url;
     if (!targetUrl) return res.status(400).send('Falta URL');
 
     try {
+        // Al descargar, inyectamos las cookies robadas
         const response = await fetch(targetUrl, {
             headers: {
                 'Referer': 'https://www.tvporinternet2.com/',
                 'Origin': 'https://www.tvporinternet2.com',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Accept': '*/*'
+                'User-Agent': globalUserAgent,
+                'Cookie': sessionCookies // <--- ESTA ES LA CLAVE DE LA SOLUCIÓN
             }
         });
 
-        // AQUÍ ESTÁ LA MAGIA: Forzamos el Content-Type correcto para Web Video Caster
-        let contentType = response.headers.get('content-type') || '';
-        if (targetUrl.includes('.m3u8')) {
-            contentType = 'application/vnd.apple.mpegurl';
-        } else if (targetUrl.includes('.ts')) {
-            contentType = 'video/mp2t';
+        if (!response.ok) {
+            console.error(`Fallo en origen: ${response.status}`);
+            return res.status(response.status).send(`Error del servidor de video: ${response.status}`);
         }
+
+        let contentType = response.headers.get('content-type') || '';
+        if (targetUrl.includes('.m3u8')) contentType = 'application/vnd.apple.mpegurl';
+        else if (targetUrl.includes('.ts')) contentType = 'video/mp2t';
 
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Content-Type', contentType);
@@ -99,3 +110,4 @@ app.get('/proxy', async (req, res) => {
 
 app.get('/', (req, res) => res.send('Cazador Online.'));
 app.listen(PORT, '0.0.0.0', () => console.log(`Servidor en puerto ${PORT}`));
+
