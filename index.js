@@ -1,56 +1,48 @@
 const express = require('express');
 const axios = require('axios');
+const morgan = require('morgan');
 const app = express();
 
+app.use(morgan('dev')); // Esto nos mostrará cada petición en los logs
+
 const PORT = process.env.PORT || 8080;
-const AGENT = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
+const AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 app.get('/animal-planet.m3u8', async (req, res) => {
-    console.log("=== Iniciando Rastreo Profundo ===");
+    console.log(">>> BUSCANDO SEÑAL...");
     try {
-        // 1. Entramos a la web principal
-        const res1 = await axios.get('https://www.tvporinternet2.com/animal-planet-en-vivo-por-internet.html', {
-            headers: { 'User-Agent': AGENT, 'Referer': 'https://www.google.com/' }
+        // Intentamos entrar a la página
+        const response = await axios.get('https://www.tvporinternet2.com/animal-planet-en-vivo-por-internet.html', {
+            headers: { 'User-Agent': AGENT, 'Referer': 'https://www.google.com/' },
+            timeout: 10000
         });
 
-        let html = res1.data;
-        let regexLink = /https?:\/\/[^"']+\.m3u8\?token=[^"']+/i;
-        let match = html.match(regexLink);
-
-        // 2. Si no aparece, buscamos el reproductor (iframe)
-        if (!match) {
-            console.log("Link no visto en superficie, buscando en el reproductor...");
-            const iframeMatch = html.match(/<iframe[^>]+src="([^"]+)"/i);
-            
-            if (iframeMatch) {
-                const iframeUrl = iframeMatch[1];
-                console.log("Entrando al túnel: " + iframeUrl);
-                const res2 = await axios.get(iframeUrl, { 
-                    headers: { 'User-Agent': AGENT, 'Referer': 'https://www.tvporinternet2.com/' } 
-                });
-                match = res2.data.match(regexLink);
-            }
-        }
+        const html = response.data;
+        
+        // Buscamos el dominio que cazaste con Reqable
+        // Buscamos cualquier cosa que tenga "regionales" y termine en ".m3u8"
+        const regex = /https?:\/\/[^"']*(regionales|saohgdasregions)[^"']+\.m3u8[^"']*/i;
+        const match = html.match(regex);
 
         if (match) {
-            const linkReal = match[0].replace(/\\/g, ''); // Limpiamos barras raras
-            console.log("¡LO TENEMOS!: " + linkReal);
-            res.redirect(`https://${req.get('host')}/proxy/video.m3u8?url=${encodeURIComponent(linkReal)}`);
+            let streamUrl = match[0].replace(/\\/g, ''); // Limpiar barras de escape
+            console.log(">>> ¡ENCONTRADO!: " + streamUrl);
+            
+            // REDIRIGIMOS AL PROXY (Esto es clave para que funcione con tu IP)
+            res.redirect(`https://${req.get('host')}/proxy/playlist.m3u8?url=${encodeURIComponent(streamUrl)}`);
         } else {
-            console.log("La página escondió el link muy bien. Intenta refrescar.");
-            res.status(404).send("Error: No se encontró la señal. La página está bloqueando el acceso.");
+            console.log(">>> El link no está en el HTML. Buscando alternativas...");
+            res.status(404).send("No se encontró el link. Es posible que el sitio use JavaScript dinámico.");
         }
-
     } catch (e) {
-        console.error("Fallo técnico: ", e.message);
-        res.status(500).send("Error del servidor: " + e.message);
+        console.error(">>> ERROR AL ENTRAR A LA WEB: " + e.message);
+        res.status(500).send("Error conectando con la fuente: " + e.message);
     }
 });
 
-// PROXY (No lo toques, es el que hace que se vea en verde)
+// EL MOTOR DEL PROXY (No tocar, es sagrado)
 app.get('/proxy/:archivo', async (req, res) => {
     const targetUrl = req.query.url;
-    const archivo = req.params.archivo;
     if (!targetUrl) return res.status(400).send('Falta URL');
 
     try {
@@ -60,21 +52,23 @@ app.get('/proxy/:archivo', async (req, res) => {
             responseType: 'arraybuffer',
             headers: {
                 'Referer': 'https://www.tvporinternet2.com/',
-                'User-Agent': AGENT
+                'User-Agent': AGENT,
+                'Origin': 'https://www.tvporinternet2.com'
             }
         });
 
         res.setHeader('Access-Control-Allow-Origin', '*');
 
-        if (archivo.includes('.m3u8')) {
+        if (req.params.archivo.includes('.m3u8')) {
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             let text = Buffer.from(response.data).toString();
             const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
             
+            // Reemplazamos los links de los segmentos para que pasen por el proxy
             let finalM3u8 = text.replace(/^(?!#)(.+)$/gm, (match, p1) => {
                 let chunk = p1.trim();
                 let fullUrl = chunk.startsWith('http') ? chunk : baseUrl + chunk;
-                return `https://${req.get('host')}/proxy/chunk.ts?url=${encodeURIComponent(fullUrl)}`;
+                return `https://${req.get('host')}/proxy/video.ts?url=${encodeURIComponent(fullUrl)}`;
             });
             res.send(finalM3u8);
         } else {
@@ -82,9 +76,15 @@ app.get('/proxy/:archivo', async (req, res) => {
             res.send(response.data);
         }
     } catch (error) {
+        console.error(">>> ERROR EN PROXY: " + error.message);
         res.status(500).end();
     }
 });
 
-app.get('/', (req, res) => res.send('Cazador Activo y Listo.'));
-app.listen(PORT, '0.0.0.0', () => console.log(`Puerto ${PORT}`));
+app.get('/', (req, res) => res.send('Servidor de Video Activo v1.2'));
+
+app.listen(PORT, '0.0.0.0', () => {
+    console.log("========================================");
+    console.log(`Servidor corriendo en puerto ${PORT}`);
+    console.log("========================================");
+});
