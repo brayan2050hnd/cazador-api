@@ -8,16 +8,21 @@ app.get('/animal-planet', async (req, res) => {
     console.log("Iniciando cacería de link...");
     let browser;
     try {
+        // 1. OPTIMIZACIÓN DE MEMORIA: Añadimos comandos para evitar que Railway se quede sin RAM
         browser = await chromium.launch({ 
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage', // Evita crashes en Docker/Railway
+                '--disable-gpu',
+                '--single-process'
+            ] 
         });
         
         const context = await browser.newContext({
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            extraHTTPHeaders: {
-                'Referer': 'https://www.tvporinternet2.com/'
-            }
+            extraHTTPHeaders: { 'Referer': 'https://www.tvporinternet2.com/' }
         });
         
         const page = await context.newPage();
@@ -25,15 +30,14 @@ app.get('/animal-planet', async (req, res) => {
 
         page.on('request', request => {
             const url = request.url();
-            if (url.includes('.m3u8')) {
-                m3u8Url = url;
-            }
+            if (url.includes('.m3u8')) m3u8Url = url;
         });
 
+        // 2. EVITAR TIMEOUTS: Cambiamos 'networkidle' por 'domcontentloaded' (es más rápido y no espera a los anuncios)
         await page.goto('https://www.tvporinternet2.com/animal-planet-en-vivo-por-internet.html', { 
-            waitUntil: 'networkidle', 
-            timeout: 60000 
-        });
+            waitUntil: 'domcontentloaded', 
+            timeout: 30000 
+        }).catch(() => console.log("Aviso: Navegación detenida, pero buscando link..."));
 
         let espera = 0;
         while (!m3u8Url && espera < 15) {
@@ -44,9 +48,8 @@ app.get('/animal-planet', async (req, res) => {
         await browser.close();
 
         if (m3u8Url) {
-            console.log("Link capturado, procesando puente m3u8...");
+            console.log("Link capturado, procesando Proxy Total...");
             
-            // 1. Hacemos que Railway pida el archivo m3u8 para saltar el bloqueo de IP/Token
             const response = await fetch(m3u8Url, {
                 headers: {
                     'Referer': 'https://www.tvporinternet2.com/',
@@ -55,31 +58,57 @@ app.get('/animal-planet', async (req, res) => {
             });
 
             let m3u8Text = await response.text();
-
-            // 2. Extraemos la ruta base del link original
             const baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
             
-            // 3. Arreglamos los fragmentos de video (.ts) para que tu app sepa de dónde descargarlos
-            // Esta línea mágica añade la URL base a cualquier línea que no empiece con http o #
-            m3u8Text = m3u8Text.replace(/^(?!http|#)(.+)$/gm, baseUrl + '$1');
+            // Detectamos la URL de tu app en Railway automáticamente
+            const serverUrl = `https://${req.get('host')}`;
+            
+            // 3. PROXY TOTAL: Reescribimos TODAS las rutas de video para que pasen por Railway
+            m3u8Text = m3u8Text.replace(/^(?!#)(.+)$/gm, (match, p1) => {
+                let fullUrl = p1.startsWith('http') ? p1 : baseUrl + p1;
+                return `${serverUrl}/proxy-video?url=${encodeURIComponent(fullUrl)}`;
+            });
 
-            // 4. Se lo enviamos a tu app indicando que es un formato de video directo
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.send(m3u8Text);
 
         } else {
-            res.status(404).send("No se encontró el link. Intenta de nuevo.");
+            res.status(404).send("No se encontró el link.");
         }
     } catch (e) {
-        console.error("Error: ", e.message);
+        console.error("Error general: ", e.message);
         if (browser) await browser.close();
-        res.status(500).send("Error en el servidor: " + e.message);
+        res.status(500).send("Error en el servidor.");
     }
 });
 
-app.get('/', (req, res) => res.send('Servidor Cazador Online. Pega la ruta /animal-planet en tu app.'));
+// 4. EL NUEVO PUENTE: Este endpoint descarga los videos por ti y te los envía
+app.get('/proxy-video', async (req, res) => {
+    const targetUrl = req.query.url;
+    if (!targetUrl) return res.status(400).send('Falta URL');
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor activo en puerto ${PORT}`);
+    try {
+        const response = await fetch(targetUrl, {
+            headers: {
+                'Referer': 'https://www.tvporinternet2.com/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+
+        if (!response.ok) throw new Error(`Error de origen: ${response.status}`);
+
+        res.setHeader('Content-Type', response.headers.get('content-type') || 'video/mp2t');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        
+        const buffer = await response.arrayBuffer();
+        res.send(Buffer.from(buffer));
+
+    } catch (error) {
+        res.status(500).end();
+    }
 });
+
+app.get('/', (req, res) => res.send('Servidor activo. Pega la ruta /animal-planet en tu app.'));
+
+app.listen(PORT, '0.0.0.0', () => console.log(`Servidor en puerto ${PORT}`));
