@@ -1,7 +1,6 @@
 {
-  "name": "cazador-automatico",
-  "version": "1.0.0",
-  "description": "Extractor de links m3u8",
+  "name": "cazador-pro",
+  "version": "1.1.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
