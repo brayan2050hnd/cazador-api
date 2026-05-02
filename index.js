@@ -1,62 +1,55 @@
 const express = require('express');
-const axios = require('axios');
 const app = express();
 
 const PORT = process.env.PORT || 8080;
-const AGENT = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
 
-app.get('/', (req, res) => res.send('Servidor Blindado Activo'));
-
-app.get('/manual', (req, res) => {
-    const urlReqable = req.query.url;
-    if(!urlReqable) return res.send("Falta el parámetro ?url=");
-    res.redirect(`/proxy/playlist.m3u8?url=${encodeURIComponent(urlReqable)}`);
+// 1. PÁGINA DE INICIO
+app.get('/', (req, res) => {
+    res.send('<h1>Servidor de Iframe Nexus</h1>');
 });
 
-app.get('/proxy/:archivo', async (req, res) => {
-    const targetUrl = req.query.url;
-    if (!targetUrl) return res.status(400).send('URL no válida');
+// 2. EL CREADOR DE IFRAME (Aquí ocurre la magia)
+app.get('/player', (req, res) => {
+    const urlM3u8 = req.query.url;
+    if(!urlM3u8) return res.send("Falta el link .m3u8");
 
-    // Intentamos extraer tu IP del link de Reqable para "suplantarla"
-    // El pedazo 'MTgxLjExNS4xMTkuODY=' equivale a '181.115.119.86'
-    const miIpDeHonduras = "181.115.119.86"; 
-
-    try {
-        const response = await axios({
-            method: 'get',
-            url: targetUrl,
-            responseType: 'arraybuffer',
-            headers: {
-                'User-Agent': AGENT,
-                'Referer': 'https://www.tvporinternet2.com/',
-                'X-Forwarded-For': miIpDeHonduras, // Intentamos engañar al servidor
-                'X-Real-IP': miIpDeHonduras,
-                'Accept': '*/*',
-                'Connection': 'keep-alive'
-            },
-            timeout: 12000
-        });
-
-        res.setHeader('Access-Control-Allow-Origin', '*');
-
-        if (req.params.archivo.includes('.m3u8')) {
-            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-            let text = Buffer.from(response.data).toString();
-            const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
-            let finalM3u8 = text.replace(/^(?!#)(.+)$/gm, (match, p1) => {
-                let chunk = p1.trim();
-                let fullUrl = chunk.startsWith('http') ? chunk : baseUrl + chunk;
-                return `https://${req.get('host')}/proxy/video.ts?url=${encodeURIComponent(fullUrl)}`;
-            });
-            res.send(finalM3u8);
-        } else {
-            res.setHeader('Content-Type', 'video/mp2t');
-            res.send(response.data);
-        }
-    } catch (e) {
-        // Si sigue dando 403, el servidor de la TV es demasiado inteligente
-        res.status(e.response ? e.response.status : 500).send("El servidor de TV sigue bloqueando la IP de Railway (Error 403)");
-    }
+    // Generamos un HTML con el reproductor Clappr (es muy bueno para Android)
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <script src="https://cdn.jsdelivr.net/npm/clappr@latest/dist/clappr.min.js"></script>
+            <style>
+                body, html { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
+                #player { width: 100vw; height: 100vh; }
+            </style>
+        </head>
+        <body>
+            <div id="player"></div>
+            <script>
+                var player = new Clappr.Player({
+                    source: "${urlM3u8}",
+                    parentId: "#player",
+                    width: "100%",
+                    height: "100%",
+                    autoPlay: true,
+                    mimeType: "application/x-mpegURL",
+                    plugins: {
+                        html5Video: {
+                            hlsjsConfig: {
+                                // Esto ayuda a que cargue más rápido
+                                enableWorker: true,
+                                lowLatencyMode: true,
+                            }
+                        }
+                    }
+                });
+            </script>
+        </body>
+        </html>
+    `);
 });
 
-app.listen(PORT, '0.0.0.0');
+app.listen(PORT, '0.0.0.0', () => console.log(`Reproductor listo en puerto ${PORT}`));
