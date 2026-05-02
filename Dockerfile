@@ -1,24 +1,20 @@
-FROM node:20
+# Usamos una imagen de Node limpia y ligera
+FROM node:20-slim
+
+# Creamos la carpeta de la app
 WORKDIR /app
 
-# Instalamos las dependencias necesarias para que corra el navegador
-RUN apt-get update && apt-get install -y \
-    libgbm-dev \
-    libnss3 \
-    libasound2 \
-    libxss1 \
-    libxtst6 \
-    && rm -rf /var/lib/apt/lists/*
-
+# Solo copiamos los archivos de configuración primero (optimiza el build)
 COPY package*.json ./
-RUN npm install
 
-# Instalamos el navegador Chromium y sus dependencias internas
-RUN npx playwright install --with-deps chromium
+# Instalamos solo lo necesario (Express, Axios, Morgan)
+RUN npm install --production
 
+# Copiamos el resto del código
 COPY . .
 
-# Railway usa el puerto 8080 por defecto
+# Puerto de Railway
 EXPOSE 8080
 
+# Comando de arranque
 CMD ["node", "index.js"]
