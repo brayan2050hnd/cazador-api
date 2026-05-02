@@ -8,7 +8,7 @@ let sessionCookies = '';
 let globalUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
 app.get('/animal-planet.m3u8', async (req, res) => {
-    console.log("Iniciando cacería Ninja (Extrema rapidez)...");
+    console.log("Iniciando cacería en Alon.one...");
     let browser;
     try {
         browser = await chromium.launch({ 
@@ -25,15 +25,16 @@ app.get('/animal-planet.m3u8', async (req, res) => {
         
         const context = await browser.newContext({
             userAgent: globalUserAgent,
-            extraHTTPHeaders: { 'Referer': 'https://www.tvporinternet2.com/' }
+            // Cambiamos el pase VIP para la nueva página
+            extraHTTPHeaders: { 'Referer': 'https://alon.one/' }
         });
         
         const page = await context.newPage();
 
-        // Bloqueo extremo: Solo dejamos pasar scripts vitales
+        // Bloqueamos imágenes y fuentes para no saturar Railway
         await page.route('**/*', (route) => {
             const type = route.request().resourceType();
-            if (['image', 'stylesheet', 'font', 'media'].includes(type)) {
+            if (['image', 'stylesheet', 'font'].includes(type)) {
                 route.abort(); 
             } else {
                 route.continue();
@@ -42,39 +43,39 @@ app.get('/animal-planet.m3u8', async (req, res) => {
 
         let m3u8Url = null;
 
-        // LA CLAVE: Promesa que estalla apenas encuentra el link
         const atraparLink = new Promise((resolve) => {
             page.on('response', async response => {
                 const url = response.url();
+                // Atrapamos el m3u8
                 if (url.includes('.m3u8') && !m3u8Url) {
                     m3u8Url = url;
-                    resolve(); // ¡Encontrado, salimos de aquí!
+                    resolve(); 
                 }
             });
         });
 
-        // Entramos sin esperar a que cargue todo (evita que Railway se ahogue)
-        page.goto('https://www.tvporinternet2.com/animal-planet-en-vivo-por-internet.html', { 
-            waitUntil: 'commit' 
+        // Entramos a la NUEVA página
+        page.goto('https://alon.one/alontv/canal/166-animal-planet-latinoamerica', { 
+            waitUntil: 'domcontentloaded' 
         }).catch(() => {});
 
-        // Esperamos máximo 15 segundos o hasta que el Ninja lo encuentre
+        // Le damos 15 segundos máximo para encontrarlo
         await Promise.race([ atraparLink, new Promise(r => setTimeout(r, 15000)) ]);
 
         if (m3u8Url) {
             const cookies = await context.cookies();
             sessionCookies = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-            console.log("¡Link atrapado al vuelo! Saliendo antes de crashear.");
+            console.log("¡Link de Alon.one atrapado!: ", m3u8Url);
         }
 
         await browser.close();
 
         if (m3u8Url) {
+            // Lo enviamos a nuestro proxy
             res.redirect(`https://${req.get('host')}/proxy/video.m3u8?url=${encodeURIComponent(m3u8Url)}`);
         } else {
-            // Mandamos un video "falso" para que la app no tire error de formato
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-            res.send("#EXTM3U\n#EXTINF:-1,Canal Caido\nhttp://localhost/error.ts");
+            res.send("#EXTM3U\n#EXTINF:-1,No se encontro link\nhttp://localhost/error.ts");
         }
     } catch (e) {
         console.error("Error crítico evadido:", e.message);
@@ -84,7 +85,7 @@ app.get('/animal-planet.m3u8', async (req, res) => {
     }
 });
 
-// EL PROXY CAMUFLADO (Se mantiene igual)
+// NUESTRO PROXY (Ajustado para Alon.one)
 app.get('/proxy/:archivo', async (req, res) => {
     const targetUrl = req.query.url;
     const archivo = req.params.archivo; 
@@ -93,7 +94,9 @@ app.get('/proxy/:archivo', async (req, res) => {
     try {
         const response = await fetch(targetUrl, {
             headers: {
-                'Referer': 'https://www.tvporinternet2.com/',
+                // Actualizamos las cabeceras para que coincidan con la nueva web
+                'Referer': 'https://alon.one/',
+                'Origin': 'https://alon.one',
                 'User-Agent': globalUserAgent,
                 'Cookie': sessionCookies
             }
@@ -138,4 +141,3 @@ app.get('/proxy/:archivo', async (req, res) => {
 
 app.get('/', (req, res) => res.send('Cazador Online.'));
 app.listen(PORT, '0.0.0.0', () => console.log(`Servidor en puerto ${PORT}`));
-
