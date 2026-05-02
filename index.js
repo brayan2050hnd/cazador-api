@@ -8,7 +8,7 @@ let sessionCookies = '';
 let globalUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
 app.get('/animal-planet.m3u8', async (req, res) => {
-    console.log("Iniciando cacería optimizada (Anti-Crash)...");
+    console.log("Iniciando cacería Ninja (Extrema rapidez)...");
     let browser;
     try {
         browser = await chromium.launch({ 
@@ -30,12 +30,11 @@ app.get('/animal-planet.m3u8', async (req, res) => {
         
         const page = await context.newPage();
 
-        // ¡NUEVO: BLOQUEADOR DE ANUNCIOS Y COSAS PESADAS!
-        // Esto evita que Railway se quede sin memoria RAM y se apague
+        // Bloqueo extremo: Solo dejamos pasar scripts vitales
         await page.route('**/*', (route) => {
             const type = route.request().resourceType();
             if (['image', 'stylesheet', 'font', 'media'].includes(type)) {
-                route.abort(); // Cancelamos la carga de basura
+                route.abort(); 
             } else {
                 route.continue();
             }
@@ -43,49 +42,49 @@ app.get('/animal-planet.m3u8', async (req, res) => {
 
         let m3u8Url = null;
 
-        page.on('response', async response => {
-            const url = response.url();
-            if (url.includes('.m3u8') && !m3u8Url) {
-                m3u8Url = url;
-            }
+        // LA CLAVE: Promesa que estalla apenas encuentra el link
+        const atraparLink = new Promise((resolve) => {
+            page.on('response', async response => {
+                const url = response.url();
+                if (url.includes('.m3u8') && !m3u8Url) {
+                    m3u8Url = url;
+                    resolve(); // ¡Encontrado, salimos de aquí!
+                }
+            });
         });
 
-        // Aumentamos el tiempo de espera por si la web está lenta
-        await page.goto('https://www.tvporinternet2.com/animal-planet-en-vivo-por-internet.html', { 
-            waitUntil: 'domcontentloaded', 
-            timeout: 45000 
-        }).catch(e => console.log("Aviso de navegación:", e.message));
+        // Entramos sin esperar a que cargue todo (evita que Railway se ahogue)
+        page.goto('https://www.tvporinternet2.com/animal-planet-en-vivo-por-internet.html', { 
+            waitUntil: 'commit' 
+        }).catch(() => {});
 
-        let espera = 0;
-        while (!m3u8Url && espera < 15) {
-            await new Promise(r => setTimeout(r, 1000));
-            espera++;
-        }
+        // Esperamos máximo 15 segundos o hasta que el Ninja lo encuentre
+        await Promise.race([ atraparLink, new Promise(r => setTimeout(r, 15000)) ]);
 
-        if(m3u8Url) {
+        if (m3u8Url) {
             const cookies = await context.cookies();
             sessionCookies = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+            console.log("¡Link atrapado al vuelo! Saliendo antes de crashear.");
         }
 
         await browser.close();
 
         if (m3u8Url) {
-            console.log("¡Link atrapado! Redirigiendo...");
             res.redirect(`https://${req.get('host')}/proxy/video.m3u8?url=${encodeURIComponent(m3u8Url)}`);
         } else {
-            // Mandamos un video vacío para que WVC no lance error feo
+            // Mandamos un video "falso" para que la app no tire error de formato
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-            res.send("#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:10.0,\nhttp://localhost/vacio.ts");
+            res.send("#EXTM3U\n#EXTINF:-1,Canal Caido\nhttp://localhost/error.ts");
         }
     } catch (e) {
-        console.error("Error crítico:", e.message);
+        console.error("Error crítico evadido:", e.message);
         if (browser) await browser.close();
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-        res.send("#EXTM3U\n#EXTINF:10.0,\nhttp://localhost/vacio.ts");
+        res.send("#EXTM3U\n#EXTINF:-1,Reintentar\nhttp://localhost/error.ts");
     }
 });
 
-// EL PROXY CAMUFLADO (Queda intacto)
+// EL PROXY CAMUFLADO (Se mantiene igual)
 app.get('/proxy/:archivo', async (req, res) => {
     const targetUrl = req.query.url;
     const archivo = req.params.archivo; 
