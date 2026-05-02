@@ -1,13 +1,13 @@
 {
   "name": "cazador-api",
   "version": "1.0.0",
-  "description": "API para capturar enlaces de Animal Planet",
+  "description": "API para Animal Planet",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "playwright": "1.59.1"
+    "playwright": "1.49.0"
   }
 }
