@@ -5,25 +5,24 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 const AGENT = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
 
-// RUTA AUTOMÁTICA: Intenta cazar el link entrando a los PHP que encontré en tu archivo
+// RUTA AUTOMÁTICA: Intenta cazar el link entrando a los PHP que encontramos en tu archivo
 app.get('/animal-planet.m3u8', async (req, res) => {
-    // Estas son las rutas que vi en tu prueba.txt
     const opciones = [
         'https://www.tvporinternet2.com/live/animalplanet.php',
-        'https://www.tvporinternet2.com/live4/animalplanet.php', // Opción FHD
+        'https://www.tvporinternet2.com/live4/animalplanet.php',
         'https://www.tvporinternet2.com/live6/animalplanet.php'
     ];
 
-    console.log(">>> Iniciando rastreo en las 6 opciones...");
+    console.log(">>> Iniciando rastreo en las opciones...");
 
-    for (let url de opciones) {
+    // AQUÍ ESTABA EL ERROR: Cambiamos "de" por "of"
+    for (let url of opciones) {
         try {
             const response = await axios.get(url, {
                 headers: { 'User-Agent': AGENT, 'Referer': 'https://www.tvporinternet2.com/' },
                 timeout: 5000
             });
             
-            // Buscamos el dominio saohgdasregions que aparece en tu archivo
             const regex = /https?[:\/\\]+[^"']*(regionales|saohgdasregions)[^"']+\.m3u8\?token=[^"'\s&]+/i;
             const match = response.data.match(regex);
 
@@ -32,12 +31,15 @@ app.get('/animal-planet.m3u8', async (req, res) => {
                 console.log(">>> ¡LOGRADO! Link capturado de: " + url);
                 return res.redirect(`/player?url=${encodeURIComponent(streamUrl)}`);
             }
-        } catch (e) { continue; }
+        } catch (e) { 
+            console.log(">>> Falló la opción: " + url);
+            continue; 
+        }
     }
-    res.status(404).send("No se pudo cazar el link. Usa el modo /manual con Reqable.");
+    res.status(404).send("No se pudo cazar el link automáticamente. Usa el modo /manual.");
 });
 
-// EL REPRODUCTOR (IFRAME) - Basado en lo que pidió tu App
+// EL REPRODUCTOR (IFRAME)
 app.get('/player', (req, res) => {
     const urlM3u8 = req.query.url;
     if(!urlM3u8) return res.send("Falta el link");
@@ -62,12 +64,12 @@ app.get('/player', (req, res) => {
     `);
 });
 
-// MODO MANUAL (El que nunca falla)
+// MODO MANUAL
 app.get('/manual', (req, res) => {
     const urlReqable = req.query.url;
     if(!urlReqable) return res.send("Usa: /manual?url=LINK_DE_REQABLE");
     res.redirect(`/player?url=${encodeURIComponent(urlReqable)}`);
 });
 
-app.get('/', (req, res) => res.send('<h1>Cazador Nexus v1.6</h1>'));
-app.listen(PORT, '0.0.0.0');
+app.get('/', (req, res) => res.send('<h1>Cazador Nexus v1.6.1</h1>'));
+app.listen(PORT, '0.0.0.0', () => console.log("Servidor corriendo..."));
