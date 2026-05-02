@@ -4,24 +4,17 @@ const app = express();
 
 const PORT = process.env.PORT || 8080;
 
-// 1. RUTA PRINCIPAL (La que caza el link inicial)
 app.get('/animal-planet', async (req, res) => {
     console.log("Iniciando cacería de link...");
     let browser;
     try {
         browser = await chromium.launch({ 
             headless: true,
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--single-process'
-            ] 
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--single-process'] 
         });
         
         const context = await browser.newContext({
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             extraHTTPHeaders: { 'Referer': 'https://www.tvporinternet2.com/' }
         });
         
@@ -48,7 +41,6 @@ app.get('/animal-planet', async (req, res) => {
 
         if (m3u8Url) {
             console.log("Link cazado:", m3u8Url);
-            // Redirigimos tu app a nuestro Proxy Maestro
             const proxyUrl = `https://${req.get('host')}/proxy?url=${encodeURIComponent(m3u8Url)}`;
             res.redirect(proxyUrl);
         } else {
@@ -60,7 +52,6 @@ app.get('/animal-planet', async (req, res) => {
     }
 });
 
-// 2. EL PROXY MAESTRO (El que traduce las "muñecas rusas" y descarga los videos)
 app.get('/proxy', async (req, res) => {
     const targetUrl = req.query.url;
     if (!targetUrl) return res.status(400).send('Falta URL');
@@ -69,35 +60,35 @@ app.get('/proxy', async (req, res) => {
         const response = await fetch(targetUrl, {
             headers: {
                 'Referer': 'https://www.tvporinternet2.com/',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'Origin': 'https://www.tvporinternet2.com',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': '*/*'
             }
         });
 
-        if (!response.ok) return res.status(response.status).send('Error origen');
+        // AQUÍ ESTÁ LA MAGIA: Forzamos el Content-Type correcto para Web Video Caster
+        let contentType = response.headers.get('content-type') || '';
+        if (targetUrl.includes('.m3u8')) {
+            contentType = 'application/vnd.apple.mpegurl';
+        } else if (targetUrl.includes('.ts')) {
+            contentType = 'video/mp2t';
+        }
 
-        const contentType = response.headers.get('content-type') || '';
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Content-Type', contentType);
 
-        // Si lo que pidió la app es una lista (texto)
-        if (targetUrl.includes('.m3u8') || contentType.includes('mpegurl')) {
+        if (targetUrl.includes('.m3u8')) {
             let text = await response.text();
-            
-            // Magia: Convertimos CUALQUIER link de la lista para que pase por nuestro proxy
             text = text.replace(/^(?!#)(.+)$/gm, (match, p1) => {
                 let fullUrl = new URL(p1.trim(), targetUrl).href;
                 return `https://${req.get('host')}/proxy?url=${encodeURIComponent(fullUrl)}`;
             });
-
-            // Y si el video tiene llave de seguridad, también la pasamos por el proxy
             text = text.replace(/URI="([^"]+)"/g, (match, p1) => {
                 let fullUrl = new URL(p1.trim(), targetUrl).href;
                 return `URI="https://${req.get('host')}/proxy?url=${encodeURIComponent(fullUrl)}"`;
             });
-
             res.send(text);
         } else {
-            // Si lo que pidió es el pedacito de video real (.ts), lo descargamos y se lo mandamos a tu app
             const buffer = await response.arrayBuffer();
             res.send(Buffer.from(buffer));
         }
@@ -108,4 +99,3 @@ app.get('/proxy', async (req, res) => {
 
 app.get('/', (req, res) => res.send('Cazador Online.'));
 app.listen(PORT, '0.0.0.0', () => console.log(`Servidor en puerto ${PORT}`));
-
