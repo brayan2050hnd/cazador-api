@@ -7,14 +7,20 @@ const PORT = process.env.PORT || 8080;
 let sessionCookies = '';
 let globalUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
-// 1. RUTA PRINCIPAL
 app.get('/animal-planet.m3u8', async (req, res) => {
-    console.log("Iniciando cacería maestra...");
+    console.log("Iniciando cacería optimizada (Anti-Crash)...");
     let browser;
     try {
         browser = await chromium.launch({ 
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--single-process',
+                '--no-zygote'
+            ] 
         });
         
         const context = await browser.newContext({
@@ -23,6 +29,18 @@ app.get('/animal-planet.m3u8', async (req, res) => {
         });
         
         const page = await context.newPage();
+
+        // ¡NUEVO: BLOQUEADOR DE ANUNCIOS Y COSAS PESADAS!
+        // Esto evita que Railway se quede sin memoria RAM y se apague
+        await page.route('**/*', (route) => {
+            const type = route.request().resourceType();
+            if (['image', 'stylesheet', 'font', 'media'].includes(type)) {
+                route.abort(); // Cancelamos la carga de basura
+            } else {
+                route.continue();
+            }
+        });
+
         let m3u8Url = null;
 
         page.on('response', async response => {
@@ -32,10 +50,11 @@ app.get('/animal-planet.m3u8', async (req, res) => {
             }
         });
 
+        // Aumentamos el tiempo de espera por si la web está lenta
         await page.goto('https://www.tvporinternet2.com/animal-planet-en-vivo-por-internet.html', { 
             waitUntil: 'domcontentloaded', 
-            timeout: 30000 
-        }).catch(() => {});
+            timeout: 45000 
+        }).catch(e => console.log("Aviso de navegación:", e.message));
 
         let espera = 0;
         while (!m3u8Url && espera < 15) {
@@ -43,26 +62,30 @@ app.get('/animal-planet.m3u8', async (req, res) => {
             espera++;
         }
 
-        // Robamos las cookies de seguridad
-        const cookies = await context.cookies();
-        sessionCookies = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+        if(m3u8Url) {
+            const cookies = await context.cookies();
+            sessionCookies = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+        }
 
         await browser.close();
 
         if (m3u8Url) {
-            console.log("¡Link atrapado! Redirigiendo al Proxy Camuflado...");
-            // Lo mandamos al proxy, pero terminando en .m3u8 para engañar a tu app
+            console.log("¡Link atrapado! Redirigiendo...");
             res.redirect(`https://${req.get('host')}/proxy/video.m3u8?url=${encodeURIComponent(m3u8Url)}`);
         } else {
-            res.status(404).send("No se encontró el link.");
+            // Mandamos un video vacío para que WVC no lance error feo
+            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+            res.send("#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:10.0,\nhttp://localhost/vacio.ts");
         }
     } catch (e) {
+        console.error("Error crítico:", e.message);
         if (browser) await browser.close();
-        res.status(500).send("Error en servidor.");
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        res.send("#EXTM3U\n#EXTINF:10.0,\nhttp://localhost/vacio.ts");
     }
 });
 
-// 2. EL PROXY CAMUFLADO (Maneja las descargas sin que te bloqueen la IP)
+// EL PROXY CAMUFLADO (Queda intacto)
 app.get('/proxy/:archivo', async (req, res) => {
     const targetUrl = req.query.url;
     const archivo = req.params.archivo; 
@@ -81,7 +104,6 @@ app.get('/proxy/:archivo', async (req, res) => {
 
         res.setHeader('Access-Control-Allow-Origin', '*');
 
-        // Si tu app pide una lista de video
         if (archivo.includes('.m3u8')) {
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             let text = await response.text();
@@ -95,7 +117,6 @@ app.get('/proxy/:archivo', async (req, res) => {
                 let fullUrl = chunk.startsWith('http') ? chunk : baseUrl + chunk;
                 if (!fullUrl.includes('?') && search) fullUrl += search;
                 
-                // Disfrazamos cada pedacito de video para que pase por Railway
                 let ext = fullUrl.includes('.m3u8') ? 'lista.m3u8' : 'pedazo.ts';
                 return `https://${req.get('host')}/proxy/${ext}?url=${encodeURIComponent(fullUrl)}`;
             });
@@ -107,7 +128,6 @@ app.get('/proxy/:archivo', async (req, res) => {
 
             res.send(finalM3u8);
         } else {
-            // Si tu app pide el pedazo de video real (.ts), Railway lo descarga y te lo manda
             res.setHeader('Content-Type', 'video/mp2t');
             const buffer = await response.arrayBuffer();
             res.send(Buffer.from(buffer));
@@ -119,3 +139,4 @@ app.get('/proxy/:archivo', async (req, res) => {
 
 app.get('/', (req, res) => res.send('Cazador Online.'));
 app.listen(PORT, '0.0.0.0', () => console.log(`Servidor en puerto ${PORT}`));
+
