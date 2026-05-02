@@ -1,12 +1,13 @@
 {
-  "name": "cazador-pro",
-  "version": "1.1.0",
+  "name": "cazador-final",
+  "version": "1.2.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "axios": "^1.6.0",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "morgan": "^1.10.0"
   }
 }
