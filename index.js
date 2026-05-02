@@ -4,12 +4,12 @@ const app = express();
 
 const PORT = process.env.PORT || 8080;
 
-let sessionCookies = '';
-let globalUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+// Aquí guardaremos el "disfraz" completo del navegador
+let globalHeaders = {};
 
 app.get('/animal-planet.m3u8', async (req, res) => {
     console.log("=====================================");
-    console.log("Iniciando cacería en Alon.one...");
+    console.log("Iniciando cacería (Robo de Identidad)...");
     let browser;
     try {
         browser = await chromium.launch({ 
@@ -18,25 +18,34 @@ app.get('/animal-planet.m3u8', async (req, res) => {
         });
         
         const context = await browser.newContext({
-            userAgent: globalUserAgent,
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             extraHTTPHeaders: { 'Referer': 'https://alon.one/' }
         });
         
         const page = await context.newPage();
 
         await page.route('**/*', (route) => {
-            const type = route.request().resourceType();
-            if (['image', 'stylesheet', 'font'].includes(type)) route.abort(); 
+            if (['image', 'stylesheet', 'font'].includes(route.request().resourceType())) route.abort(); 
             else route.continue();
         });
 
         let m3u8Url = null;
 
         const atraparLink = new Promise((resolve) => {
-            page.on('response', async response => {
-                const url = response.url();
+            page.on('request', request => {
+                const url = request.url();
                 if (url.includes('.m3u8') && !m3u8Url) {
                     m3u8Url = url;
+                    
+                    // ¡MAGIA!: Robamos TODAS las cabeceras exactas que usa el navegador real
+                    const rawHeaders = request.headers();
+                    globalHeaders = {};
+                    for (const key in rawHeaders) {
+                        // Limpiamos cabeceras que harían sospechar al servidor
+                        if (!key.startsWith(':') && key !== 'host' && key !== 'accept-encoding') {
+                            globalHeaders[key] = rawHeaders[key];
+                        }
+                    }
                     resolve(); 
                 }
             });
@@ -46,18 +55,13 @@ app.get('/animal-planet.m3u8', async (req, res) => {
 
         await Promise.race([ atraparLink, new Promise(r => setTimeout(r, 15000)) ]);
 
-        if (m3u8Url) {
-            const cookies = await context.cookies();
-            sessionCookies = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-            console.log("¡Link atrapado!: ", m3u8Url);
-        }
-
         await browser.close();
 
         if (m3u8Url) {
+            console.log("¡Link y Cabeceras atrapadas con éxito!");
             res.redirect(`https://${req.get('host')}/proxy/video.m3u8?url=${encodeURIComponent(m3u8Url)}`);
         } else {
-            console.log("Fallo: No se encontró el m3u8 en la página.");
+            console.log("Fallo: No se encontró el m3u8.");
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.send("#EXTM3U\n#EXTINF:-1,Canal Caido\nhttp://localhost/error.ts");
         }
@@ -75,21 +79,16 @@ app.get('/proxy/:archivo', async (req, res) => {
     
     if (!targetUrl) return res.status(400).send('Falta URL');
 
-    console.log(`[PROXY] Tu app pide: ${archivo}`);
-    console.log(`[PROXY] Descargando desde: ${targetUrl}`);
+    console.log(`[PROXY] Pidiendo: ${targetUrl}`);
 
     try {
+        // En lugar de inventar las cabeceras, usamos el disfraz perfecto que robamos
         const response = await fetch(targetUrl, {
-            headers: {
-                'Referer': 'https://alon.one/',
-                'Origin': 'https://alon.one',
-                'User-Agent': globalUserAgent,
-                'Cookie': sessionCookies
-            }
+            headers: globalHeaders
         });
 
         if (!response.ok) {
-            console.error(`[PROXY ERROR] El servidor bloqueó la descarga. Código: ${response.status}`);
+            console.error(`[PROXY ERROR] Bloqueado. Código: ${response.status}`);
             return res.status(response.status).end();
         }
 
@@ -103,18 +102,12 @@ app.get('/proxy/:archivo', async (req, res) => {
             const urlObj = new URL(targetUrl);
             const search = urlObj.search;
 
-            // CIRUGÍA DE RUTAS: Arreglamos cómo se construyen los links internos
             let finalM3u8 = text.replace(/^(?!#)(.+)$/gm, (match, p1) => {
                 let chunk = p1.trim();
                 let fullUrl;
-                
-                if (chunk.startsWith('http')) {
-                    fullUrl = chunk; // Ya está completa
-                } else if (chunk.startsWith('/')) {
-                    fullUrl = urlObj.origin + chunk; // Ruta desde la raíz del servidor
-                } else {
-                    fullUrl = baseUrl + chunk; // Ruta relativa normal
-                }
+                if (chunk.startsWith('http')) fullUrl = chunk;
+                else if (chunk.startsWith('/')) fullUrl = urlObj.origin + chunk;
+                else fullUrl = baseUrl + chunk;
 
                 if (!fullUrl.includes('?') && search) fullUrl += search;
                 
